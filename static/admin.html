@@ -1,0 +1,64 @@
+﻿<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Admin - Garagem</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="container adminContainer">
+    <header class="adminTop">
+      <div>
+        <div class="brandKicker">ADMIN</div>
+        <h1 class="adminTitle">Garagem</h1>
+        <p class="muted">Histórico de retiradas, devoluções, checklists e fotos.</p>
+      </div>
+    </header>
+
+    <div class="card" id="loginCard">
+      <label>Senha do Admin</label>
+      <input id="password" type="password" placeholder="Digite a senha" />
+      <button class="primary" id="btnLogin">Entrar</button>
+      <p class="msg" id="loginMsg"></p>
+    </div>
+
+    <div id="adminCard" style="display:none;">
+      <div class="adminToolbar">
+        <div>
+          <h2>Registros</h2>
+          <p class="muted">Clique em um registro para abrir os detalhes.</p>
+        </div>
+        <div class="adminActions">
+          <button class="secondary" id="btnReload">Atualizar</button>
+          <button class="secondary secondaryQuiet" id="btnLogout">Sair</button>
+        </div>
+      </div>
+
+      <div id="summary" class="adminSummary"></div>
+
+      <section class="adminGrid">
+        <div class="adminPanel">
+          <div id="list"></div>
+        </div>
+
+        <aside class="adminPanel detailPanel">
+          <div class="panelHeader">
+            <h3>Detalhes</h3>
+          </div>
+          <div id="details"></div>
+
+          <div class="panelHeader photosHeader">
+            <h3>Fotos</h3>
+          </div>
+          <div id="photos" class="adminPhotos"></div>
+        </aside>
+      </section>
+
+      <p class="msg" id="adminMsg"></p>
+    </div>
+  </div>
+
+  <script src="/static/admin.js"></script>
+</body>
+</html>

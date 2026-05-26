@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.py[cod]
+
+# Local configuration and secrets
+config.json
+.env
+
+# Runtime data
+garagem.db
+uploads/
+*.log
+*.err.log
+
+# Editor/local files
+*.code-workspace

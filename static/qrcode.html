@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>QR Code - Garagem</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 40px; text-align: center; }
+    img { width: min(70vw, 360px); height: auto; image-rendering: pixelated; }
+    .url { margin-top: 18px; font-size: 18px; word-break: break-all; }
+    @media print { button { display: none; } }
+  </style>
+</head>
+<body>
+  <h1>Acesso Garagem</h1>
+  <img src="qrcode-garagem.png" alt="QR Code do sistema">
+  <div class="url">http://192.168.90.23:8000/</div>
+  <p><button onclick="window.print()">Imprimir</button></p>
+</body>
+</html>
