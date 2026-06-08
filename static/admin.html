@@ -26,8 +26,11 @@
     <div id="adminCard" style="display:none;">
       <div class="adminToolbar">
         <div>
-          <h2>Registros</h2>
-          <p class="muted">Clique em um registro para abrir os detalhes.</p>
+          <nav class="adminTabs" aria-label="Seções do admin">
+            <button type="button" class="adminTab active" id="tabRecords" data-view="records">Registros</button>
+            <button type="button" class="adminTab" id="tabVehicles" data-view="vehicles">Carros</button>
+          </nav>
+          <p class="muted" id="adminViewHint">Clique em um registro para abrir os detalhes.</p>
         </div>
         <div class="adminActions">
           <button class="secondary" id="btnReload">Atualizar</button>
@@ -35,24 +38,60 @@
         </div>
       </div>
 
-      <div id="summary" class="adminSummary"></div>
+      <section id="recordsView">
+        <div id="summary" class="adminSummary"></div>
 
-      <section class="adminGrid">
-        <div class="adminPanel">
-          <div id="list"></div>
+        <section class="adminGrid">
+          <div class="adminPanel">
+            <div id="list"></div>
+          </div>
+
+          <aside class="adminPanel detailPanel">
+            <div class="panelHeader">
+              <h3>Detalhes</h3>
+            </div>
+            <div id="details"></div>
+
+            <div class="panelHeader photosHeader">
+              <h3>Fotos</h3>
+            </div>
+            <div id="photos" class="adminPhotos"></div>
+          </aside>
+        </section>
+      </section>
+
+      <section id="vehiclesView" style="display:none;">
+        <div class="adminGrid vehiclesGrid">
+          <div class="adminPanel detailPanel">
+            <div class="panelHeader">
+              <h3 id="vehicleFormTitle">Cadastrar carro</h3>
+            </div>
+            <form id="vehicleForm" class="vehicleForm">
+              <input type="hidden" id="vehicleId" value="" />
+
+              <label for="vehiclePlate">Placa</label>
+              <input id="vehiclePlate" name="plate" placeholder="Ex.: ABC1D23" required />
+
+              <label for="vehicleDescription">Descrição / local (opcional)</label>
+              <input id="vehicleDescription" name="description" placeholder="Ex.: PORTARIA" />
+
+              <label for="vehicleBox">Caixa de liberação (opcional)</label>
+              <input id="vehicleBox" name="caixa" type="number" min="1" placeholder="Ex.: 1" />
+
+              <div class="vehicleFormActions">
+                <button type="submit" class="primary" id="btnSaveVehicle">Cadastrar carro</button>
+                <button type="button" class="secondary secondaryQuiet" id="btnCancelVehicle" style="display:none;">Cancelar edição</button>
+              </div>
+            </form>
+          </div>
+
+          <div class="adminPanel">
+            <div class="panelHeader vehiclesPanelHeader">
+              <h3>Carros cadastrados</h3>
+            </div>
+            <div id="vehiclesList"></div>
+          </div>
         </div>
-
-        <aside class="adminPanel detailPanel">
-          <div class="panelHeader">
-            <h3>Detalhes</h3>
-          </div>
-          <div id="details"></div>
-
-          <div class="panelHeader photosHeader">
-            <h3>Fotos</h3>
-          </div>
-          <div id="photos" class="adminPhotos"></div>
-        </aside>
       </section>
 
       <p class="msg" id="adminMsg"></p>

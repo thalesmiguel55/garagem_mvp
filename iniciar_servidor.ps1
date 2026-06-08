@@ -7,20 +7,27 @@ param(
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
+$DefaultServerIp = "192.168.88.249"
 $Python = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
 if (-not (Test-Path $Python)) {
     throw "Ambiente virtual nao encontrado em .venv\Scripts\python.exe"
 }
 
 function Get-LocalIPv4 {
+    $ips = @()
     $matches = ipconfig | Select-String -Pattern '(\d{1,3}\.){3}\d{1,3}'
     foreach ($match in $matches) {
         $ip = $match.Matches[0].Value
         if ($ip -notlike "127.*" -and $ip -notlike "169.254.*" -and $ip -ne "0.0.0.0") {
-            return $ip
+            $ips += $ip
         }
     }
-    throw "Nao foi possivel detectar o IP local. Informe -PublicUrl http://IP_DO_SERVIDOR:$Port/"
+
+    $preferred = $ips | Where-Object { $_ -like "192.168.88.*" } | Select-Object -First 1
+    if ($preferred) { return $preferred }
+
+    if ($ips.Count -gt 0) { return $ips[0] }
+    return $DefaultServerIp
 }
 
 if ([string]::IsNullOrWhiteSpace($PublicUrl)) {
@@ -33,7 +40,7 @@ Write-Host "Sistema Garagem"
 Write-Host "URL para funcionarios: $PublicUrl"
 Write-Host "QR Code: static\qrcode-garagem.png"
 Write-Host ""
-Write-Host "Se celulares de outras subredes nao acessarem, libere a porta $Port no firewall do Windows e no roteamento entre VLANs/subredes."
+Write-Host "Servidor configurado para a rede 192.168.88.x"
 Write-Host ""
 
 & $Python gerar_qrcode.py --url $PublicUrl --output "static\qrcode-garagem.png" --html "static\qrcode.html"

@@ -74,7 +74,7 @@ function renderHome(ctx) {
     "Devolução: escolha a placa em uso e finalize.";
 
   if (anyAvailable) {
-    card.appendChild(renderCheckout(plates));
+    card.appendChild(renderCheckout(plates, ctx.liberacaoCaixasHabilitada === true));
   } else {
     const warn = el("div", { class: "info" });
     warn.innerHTML = "<b>Retirada:</b> nenhuma placa disponível no momento.";
@@ -91,7 +91,7 @@ function renderHome(ctx) {
   }
 }
 
-function renderCheckout(plates) {
+function renderCheckout(plates, liberacaoCaixasHabilitada = false) {
   const wrap = el("div", { class: "card" });
 
   const title = el("h3", { text: "RETIRADA" });
@@ -249,7 +249,8 @@ function renderCheckout(plates) {
 
   details.appendChild(photosBox);
 
-  const btn = el("button", { type: "submit", class: "primary", text: "Enviar e Liberar" });
+  const submitLabel = liberacaoCaixasHabilitada ? "Enviar e Liberar" : "Registrar retirada";
+  const btn = el("button", { type: "submit", class: "primary", text: submitLabel });
   details.appendChild(btn);
   form.appendChild(details);
 
@@ -261,16 +262,17 @@ function renderCheckout(plates) {
     if (!plateHidden.value) return showMessage("Escolha uma placa disponível.", "err");
 
     btn.disabled = true;
-    btn.textContent = "Liberando...";
+    btn.textContent = liberacaoCaixasHabilitada ? "Liberando..." : "Validando...";
 
     try {
-      const releaseFd = new FormData();
-      releaseFd.append("vehicle_plate", plateHidden.value);
-      const releaseRes = await fetch("/api/liberar-caixa", { method: "POST", body: releaseFd });
-      const releaseData = await parseApiResponse(releaseRes);
-      if (!releaseRes.ok) throw new Error(formatApiError(releaseData));
-
-      btn.textContent = "Validando...";
+      if (liberacaoCaixasHabilitada) {
+        const releaseFd = new FormData();
+        releaseFd.append("vehicle_plate", plateHidden.value);
+        const releaseRes = await fetch("/api/liberar-caixa", { method: "POST", body: releaseFd });
+        const releaseData = await parseApiResponse(releaseRes);
+        if (!releaseRes.ok) throw new Error(formatApiError(releaseData));
+        btn.textContent = "Validando...";
+      }
 
       if (!selfieInput.files || selfieInput.files.length === 0) {
         throw new Error("Tire uma selfie.");
@@ -299,7 +301,7 @@ function renderCheckout(plates) {
       fd.append("vehicle_plate", plateHidden.value);
       fd.append("user", user.value.trim());
       fd.append("answers_json", JSON.stringify(answers));
-      fd.append("box_released", "true");
+      fd.append("box_released", liberacaoCaixasHabilitada ? "true" : "false");
 
       Object.entries(fileInputs).forEach(([k, input]) => fd.append(k, input.files[0]));
       fd.append("selfie", selfieInput.files[0]);
@@ -319,7 +321,7 @@ function renderCheckout(plates) {
       showMessage(e.message || e, "err");
     } finally {
       btn.disabled = false;
-      btn.textContent = "Enviar e Liberar";
+      btn.textContent = submitLabel;
     }
   });
 

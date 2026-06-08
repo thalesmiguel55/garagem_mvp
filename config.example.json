@@ -3,5 +3,12 @@
     "bot_token": "COLOQUE_O_TOKEN_AQUI",
     "chat_id": "COLOQUE_O_CHAT_ID_AQUI",
     "timeout": 5
+  },
+  "hardware": {
+    "habilitar_liberacao_caixas": false
+  },
+  "alertas": {
+    "horas_retirada": 8,
+    "intervalo_verificacao_minutos": 15
   }
 }

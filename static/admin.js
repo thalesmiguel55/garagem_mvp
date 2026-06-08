@@ -12,8 +12,25 @@ const summaryEl = document.getElementById("summary");
 const listEl = document.getElementById("list");
 const detailsEl = document.getElementById("details");
 const photosEl = document.getElementById("photos");
+const recordsView = document.getElementById("recordsView");
+const vehiclesView = document.getElementById("vehiclesView");
+const adminViewHint = document.getElementById("adminViewHint");
+const tabRecords = document.getElementById("tabRecords");
+const tabVehicles = document.getElementById("tabVehicles");
+const vehicleForm = document.getElementById("vehicleForm");
+const vehicleFormTitle = document.getElementById("vehicleFormTitle");
+const vehicleIdEl = document.getElementById("vehicleId");
+const vehiclePlateEl = document.getElementById("vehiclePlate");
+const vehicleDescriptionEl = document.getElementById("vehicleDescription");
+const vehicleBoxEl = document.getElementById("vehicleBox");
+const vehiclesListEl = document.getElementById("vehiclesList");
+const btnSaveVehicle = document.getElementById("btnSaveVehicle");
+const btnCancelVehicle = document.getElementById("btnCancelVehicle");
 
 let selectedId = "";
+let currentView = "records";
+let vehiclesCache = [];
+let editingVehicleId = "";
 
 function setLoginMessage(text, type = "") {
   loginMsg.className = `msg ${type}`;
@@ -32,6 +49,9 @@ function showLogin() {
   listEl.innerHTML = "";
   detailsEl.innerHTML = "";
   photosEl.innerHTML = "";
+  vehiclesListEl.innerHTML = "";
+  currentView = "records";
+  setAdminView("records");
   setAdminMessage("");
 }
 
@@ -66,8 +86,10 @@ function formatDate(value) {
 
 function statusMeta(status) {
   const normalized = String(status || "").toUpperCase();
-  if (normalized === "OPEN") return { label: "Em uso", className: "statusOpen" };
+  if (normalized === "OPEN" || normalized === "IN_USE") return { label: "Em uso", className: "statusOpen" };
   if (normalized === "CLOSED") return { label: "Devolvido", className: "statusClosed" };
+  if (normalized === "AVAILABLE") return { label: "Disponível", className: "statusAvailable" };
+  if (normalized === "INACTIVE") return { label: "Inativo", className: "statusInactive" };
   return { label: status || "-", className: "" };
 }
 
@@ -250,6 +272,19 @@ async function apiFetch(url, opts = {}) {
   return data;
 }
 
+function setAdminView(view) {
+  currentView = view;
+  const isRecords = view === "records";
+
+  tabRecords.classList.toggle("active", isRecords);
+  tabVehicles.classList.toggle("active", !isRecords);
+  recordsView.style.display = isRecords ? "block" : "none";
+  vehiclesView.style.display = isRecords ? "none" : "block";
+  adminViewHint.textContent = isRecords
+    ? "Clique em um registro para abrir os detalhes."
+    : "Cadastre novos veículos para liberar retirada na página principal.";
+}
+
 async function doLogin() {
   setLoginMessage("");
   const password = passwordEl.value || "";
@@ -263,6 +298,7 @@ async function doLogin() {
     fd.append("password", password);
     await apiFetch("/api/admin/login", { method: "POST", body: fd });
     showAdmin();
+    setAdminView("records");
     await loadList();
   } catch (e) {
     setLoginMessage(e.message, "err");
@@ -287,6 +323,201 @@ async function loadList() {
     listEl.innerHTML = "<div class='emptyState'><strong>Falha ao carregar</strong><span>Tente atualizar a página.</span></div>";
     setAdminMessage(e.message, "err");
   }
+}
+
+function splitVehiclePlate(fullPlate) {
+  const value = String(fullPlate || "");
+  const slashIndex = value.indexOf("/");
+  if (slashIndex === -1) {
+    return { plate: value, description: "" };
+  }
+  return {
+    plate: value.slice(0, slashIndex),
+    description: value.slice(slashIndex + 1),
+  };
+}
+
+function setVehicleFormMode(mode, vehicle = null) {
+  const isEdit = mode === "edit" && vehicle;
+
+  editingVehicleId = isEdit ? vehicle.id : "";
+  vehicleIdEl.value = editingVehicleId;
+  vehicleFormTitle.textContent = isEdit ? "Editar carro" : "Cadastrar carro";
+  btnSaveVehicle.textContent = isEdit ? "Salvar alterações" : "Cadastrar carro";
+  btnCancelVehicle.style.display = isEdit ? "inline-flex" : "none";
+
+  if (isEdit) {
+    const parts = splitVehiclePlate(vehicle.plate);
+    vehiclePlateEl.value = parts.plate;
+    vehicleDescriptionEl.value = parts.description;
+    vehicleBoxEl.value = vehicle.caixa ?? "";
+    return;
+  }
+
+  vehicleForm.reset();
+  vehicleIdEl.value = "";
+}
+
+function renderVehiclesTable(items) {
+  if (!items.length) {
+    vehiclesListEl.innerHTML = "<div class='emptyState'><strong>Nenhum carro cadastrado</strong><span>Use o formulário ao lado para adicionar o primeiro veículo.</span></div>";
+    return;
+  }
+
+  const rows = items.map((vehicle) => {
+    const meta = statusMeta(vehicle.status);
+    const caixa = vehicle.caixa ? escapeHtml(vehicle.caixa) : "-";
+    const isEditing = vehicle.id === editingVehicleId ? " selected" : "";
+    const isInactive = Number(vehicle.active) !== 1;
+    const isInUse = String(vehicle.status || "").toUpperCase() === "IN_USE";
+    const rowClass = `${isEditing}${isInactive ? " rowInactive" : ""}`.trim();
+
+    let actions = "";
+    if (isInactive) {
+      actions = `<button type="button" class="tableActionBtn" data-activate-vehicle="${escapeHtml(vehicle.id)}">Reativar</button>`;
+    } else {
+      actions = `
+        <button type="button" class="tableActionBtn" data-edit-vehicle="${escapeHtml(vehicle.id)}">Editar</button>
+        <button type="button" class="tableActionBtn tableActionBtnDanger" data-deactivate-vehicle="${escapeHtml(vehicle.id)}" ${isInUse ? "disabled title='Finalize a devolução antes de desativar.'" : ""}>Desativar</button>
+      `;
+    }
+
+    return `
+      <tr data-vehicle-id="${escapeHtml(vehicle.id)}" class="${rowClass}">
+        <td>
+          <div class="plateCell${isInactive ? " plateCellInactive" : ""}">${escapeHtml(vehicle.plate)}</div>
+        </td>
+        <td><span class="statusPill ${meta.className}">${escapeHtml(meta.label)}</span></td>
+        <td>${caixa}</td>
+        <td><small>${formatDate(vehicle.created_at)}</small></td>
+        <td class="tableActions">${actions}</td>
+      </tr>
+    `;
+  }).join("");
+
+  vehiclesListEl.innerHTML = `
+    <div class="tableWrap">
+      <table class="adminTable">
+        <thead>
+          <tr>
+            <th>Placa</th>
+            <th>Status</th>
+            <th>Caixa</th>
+            <th>Cadastro</th>
+            <th>Ações</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+
+  vehiclesListEl.querySelectorAll("[data-edit-vehicle]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const vehicle = vehiclesCache.find((item) => item.id === button.getAttribute("data-edit-vehicle"));
+      if (!vehicle) return;
+      setVehicleFormMode("edit", vehicle);
+      setAdminMessage("");
+      renderVehiclesTable(vehiclesCache);
+      vehiclePlateEl.focus();
+    });
+  });
+
+  vehiclesListEl.querySelectorAll("[data-deactivate-vehicle]").forEach((button) => {
+    button.addEventListener("click", () => deactivateVehicle(button.getAttribute("data-deactivate-vehicle")));
+  });
+
+  vehiclesListEl.querySelectorAll("[data-activate-vehicle]").forEach((button) => {
+    button.addEventListener("click", () => activateVehicle(button.getAttribute("data-activate-vehicle")));
+  });
+}
+
+async function deactivateVehicle(vehicleId) {
+  const vehicle = vehiclesCache.find((item) => item.id === vehicleId);
+  if (!vehicle) return;
+
+  const confirmed = window.confirm(`Desativar o veículo ${vehicle.plate}?\n\nEle sairá da página principal, mas o histórico será mantido.`);
+  if (!confirmed) return;
+
+  setAdminMessage("");
+  try {
+    const data = await apiFetch(`/api/admin/vehicles/${vehicleId}`, { method: "DELETE" });
+    if (editingVehicleId === vehicleId) setVehicleFormMode("create");
+    setAdminMessage(data.message || "Veículo desativado com sucesso.", "ok");
+    await loadVehicles();
+  } catch (e) {
+    setAdminMessage(e.message, "err");
+  }
+}
+
+async function activateVehicle(vehicleId) {
+  setAdminMessage("");
+  try {
+    const data = await apiFetch(`/api/admin/vehicles/${vehicleId}/activate`, { method: "POST" });
+    setAdminMessage(data.message || "Veículo reativado com sucesso.", "ok");
+    await loadVehicles();
+  } catch (e) {
+    setAdminMessage(e.message, "err");
+  }
+}
+
+async function loadVehicles() {
+  setAdminMessage("");
+  vehiclesListEl.innerHTML = "<div class='loadingLine'>Carregando carros...</div>";
+
+  try {
+    const data = await apiFetch("/api/admin/vehicles");
+    vehiclesCache = data.items || [];
+    renderVehiclesTable(vehiclesCache);
+  } catch (e) {
+    vehiclesListEl.innerHTML = "<div class='emptyState'><strong>Falha ao carregar carros</strong><span>Tente atualizar a página.</span></div>";
+    setAdminMessage(e.message, "err");
+  }
+}
+
+async function saveVehicle(ev) {
+  ev.preventDefault();
+  setAdminMessage("");
+
+  const plate = vehiclePlateEl.value || "";
+  const description = vehicleDescriptionEl.value || "";
+  const caixa = vehicleBoxEl.value || "";
+
+  if (!plate.trim()) {
+    return setAdminMessage("Informe a placa do veículo.", "err");
+  }
+
+  const fd = new FormData();
+  fd.append("plate", plate.trim());
+  fd.append("description", description.trim());
+  if (caixa.trim()) fd.append("caixa", caixa.trim());
+
+  const isEdit = Boolean(editingVehicleId);
+  btnSaveVehicle.disabled = true;
+  btnSaveVehicle.textContent = isEdit ? "Salvando..." : "Cadastrando...";
+
+  try {
+    const data = isEdit
+      ? await apiFetch(`/api/admin/vehicles/${editingVehicleId}`, { method: "PUT", body: fd })
+      : await apiFetch("/api/admin/vehicles", { method: "POST", body: fd });
+
+    setVehicleFormMode("create");
+    setAdminMessage(data.message || (isEdit ? "Carro atualizado com sucesso." : "Carro cadastrado com sucesso."), "ok");
+    await loadVehicles();
+  } catch (e) {
+    setAdminMessage(e.message, "err");
+  } finally {
+    btnSaveVehicle.disabled = false;
+    btnSaveVehicle.textContent = editingVehicleId ? "Salvar alterações" : "Cadastrar carro";
+  }
+}
+
+async function reloadCurrentView() {
+  if (currentView === "vehicles") {
+    await loadVehicles();
+    return;
+  }
+  await loadList();
 }
 
 async function loadDetails(id) {
@@ -356,8 +587,27 @@ async function doLogout() {
 }
 
 btnLogin.addEventListener("click", doLogin);
-btnReload.addEventListener("click", loadList);
+btnReload.addEventListener("click", reloadCurrentView);
 btnLogout.addEventListener("click", doLogout);
+vehicleForm.addEventListener("submit", saveVehicle);
+btnCancelVehicle.addEventListener("click", () => {
+  setVehicleFormMode("create");
+  setAdminMessage("");
+  renderVehiclesTable(vehiclesCache);
+});
+
+tabRecords.addEventListener("click", async () => {
+  setAdminView("records");
+  setAdminMessage("");
+  await loadList();
+});
+
+tabVehicles.addEventListener("click", async () => {
+  setAdminView("vehicles");
+  setAdminMessage("");
+  setVehicleFormMode("create");
+  await loadVehicles();
+});
 
 passwordEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter") doLogin();

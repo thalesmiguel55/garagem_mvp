@@ -40,6 +40,11 @@ def carregar_config() -> Dict:
 
 CONFIG = carregar_config()
 TELEGRAM_CONFIG = CONFIG.get("telegram", {})
+HARDWARE_CONFIG = CONFIG.get("hardware", {})
+ALERTAS_CONFIG = CONFIG.get("alertas", {})
+LIBERACAO_CAIXAS_HABILITADA = bool(HARDWARE_CONFIG.get("habilitar_liberacao_caixas", False))
+RETIRADA_ALERTA_HORAS = float(ALERTAS_CONFIG.get("horas_retirada", 8))
+RETIRADA_ALERTA_INTERVALO_SEG = int(ALERTAS_CONFIG.get("intervalo_verificacao_minutos", 15)) * 60
 
 
 def acionar_rele(estado="on"):
@@ -89,8 +94,10 @@ def status_rele():
         }
 
 
-# >>> TROQUE pelas suas 2 placas <<<
-PLATES = ["AAA1A11/PORTARIA", "BBB2B22/MANUTENÇÃO"]
+DEFAULT_VEHICLES = [
+    ("AAA1A11/PORTARIA", 1),
+    ("BBB2B22/MANUTENÇÃO", 2),
+]
 
 # ===== Admin =====
 ADMIN_PASSWORD = os.environ.get("GARAGEM_ADMIN_PASSWORD", "admin123")  # MUDE ISSO!
@@ -121,7 +128,7 @@ def abrir_fechadura(caixa: int = 1):
 
 @app.post("/api/liberar-caixa")
 def liberar_caixa(vehicle_plate: str = Form(...)):
-    if vehicle_plate not in PLATES:
+    if not plate_is_registered(vehicle_plate):
         raise HTTPException(status_code=400, detail="Placa inválida.")
 
     conn = db()
@@ -142,14 +149,21 @@ def liberar_caixa(vehicle_plate: str = Form(...)):
         )
 
     caixa = definir_caixa(vehicle_plate)
-    if not caixa:
-        raise HTTPException(status_code=400, detail="Caixa não configurada para esta placa.")
+    if LIBERACAO_CAIXAS_HABILITADA:
+        if not caixa:
+            raise HTTPException(status_code=400, detail="Caixa não configurada para esta placa.")
 
-    ok = abrir_caixa(caixa)
-    if not ok:
-        raise HTTPException(status_code=502, detail=f"Não foi possível acionar a fechadura da caixa {caixa}.")
+        ok = abrir_caixa(caixa)
+        if not ok:
+            raise HTTPException(status_code=502, detail=f"Não foi possível acionar a fechadura da caixa {caixa}.")
 
-    return {"ok": True, "caixa": caixa, "message": f"Fechadura da caixa {caixa} acionada."}
+        return {"ok": True, "caixa": caixa, "message": f"Fechadura da caixa {caixa} acionada."}
+
+    return {
+        "ok": True,
+        "caixa": caixa,
+        "message": "Liberação de caixas desabilitada. Registro liberado sem acionar fechadura.",
+    }
 
 
 @app.get("/api/status-fechadura")
@@ -180,6 +194,10 @@ def abrir_caixa_esp(caixa):
 
 
 def abrir_caixa(caixa):
+    if not LIBERACAO_CAIXAS_HABILITADA:
+        print(f"Liberação de caixas desabilitada. Ignorando abertura da caixa {caixa}.")
+        return True
+
     if int(caixa) == 1:
         return acionar_rele("on")
 
@@ -217,6 +235,90 @@ def enviar_telegram_async(texto: str):
     threading.Thread(target=enviar_telegram, args=(texto,), daemon=True).start()
 
 
+def parse_iso_datetime(value: str) -> datetime:
+    normalized = str(value or "").strip().replace("Z", "+00:00")
+    parsed = datetime.fromisoformat(normalized)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def formatar_duracao(total_seconds: int) -> str:
+    horas, resto = divmod(max(total_seconds, 0), 3600)
+    minutos, _ = divmod(resto, 60)
+    if horas and minutos:
+        return f"{horas}h {minutos}min"
+    if horas:
+        return f"{horas}h"
+    return f"{minutos}min"
+
+
+def formatar_data_hora_local(value: str) -> str:
+    try:
+        parsed = parse_iso_datetime(value).astimezone()
+        return parsed.strftime("%d/%m/%Y %H:%M")
+    except Exception:
+        return str(value or "-")
+
+
+def verificar_retiradas_prolongadas():
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+
+    limite_segundos = int(RETIRADA_ALERTA_HORAS * 3600)
+    agora = datetime.now(timezone.utc)
+
+    conn = db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, vehicle_plate, checkout_at, checkout_user
+        FROM assignments
+        WHERE status='OPEN' AND overdue_alert_sent_at IS NULL
+    """)
+    rows = cur.fetchall()
+
+    for row in rows:
+        try:
+            checkout_at = parse_iso_datetime(row["checkout_at"])
+        except Exception:
+            print("Retirada com data inválida:", row["id"], row["checkout_at"])
+            continue
+
+        duracao = agora - checkout_at
+        if duracao.total_seconds() < limite_segundos:
+            continue
+
+        mensagem = (
+            "⚠️ Retirada prolongada\n"
+            f"Carro/placa: {row['vehicle_plate']}\n"
+            f"Quem retirou: {row['checkout_user']}\n"
+            f"Retirado em: {formatar_data_hora_local(row['checkout_at'])}\n"
+            f"Tempo em uso: {formatar_duracao(int(duracao.total_seconds()))}\n"
+            f"Limite configurado: {int(RETIRADA_ALERTA_HORAS)} horas"
+        )
+
+        if not enviar_telegram(mensagem):
+            continue
+
+        cur.execute("""
+            UPDATE assignments
+            SET overdue_alert_sent_at=?
+            WHERE id=? AND status='OPEN' AND overdue_alert_sent_at IS NULL
+        """, (agora.isoformat(), row["id"]))
+
+    conn.commit()
+    conn.close()
+
+
+def loop_monitor_retiradas():
+    while True:
+        try:
+            verificar_retiradas_prolongadas()
+        except Exception as e:
+            print("Erro no monitor de retiradas prolongadas:", e)
+        time.sleep(max(RETIRADA_ALERTA_INTERVALO_SEG, 60))
+
+
 def listar_avarias_checklist(answers: Dict) -> list[str]:
     labels = {
         "retrovisores": "Retrovisores",
@@ -231,11 +333,85 @@ def listar_avarias_checklist(answers: Dict) -> list[str]:
     ]
 
 
+def normalize_plate_part(plate: str) -> str:
+    return plate.strip().upper().replace(" ", "")
+
+
+def build_vehicle_plate(plate: str, description: str = "") -> str:
+    normalized = normalize_plate_part(plate)
+    desc = description.strip().upper()
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Informe a placa do veículo.")
+    if desc:
+        return f"{normalized}/{desc}"
+    return normalized
+
+
+def vehicle_usage_status(vehicle: Dict, open_plates: set[str]) -> str:
+    if int(vehicle.get("active", 1)) != 1:
+        return "INACTIVE"
+    if vehicle["plate"] in open_plates:
+        return "IN_USE"
+    return "AVAILABLE"
+
+
+def parse_caixa_value(caixa: Optional[str]) -> Optional[int]:
+    if caixa is None or not str(caixa).strip():
+        return None
+
+    try:
+        value = int(str(caixa).strip())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Número da caixa inválido.")
+
+    if value < 1:
+        raise HTTPException(status_code=400, detail="Número da caixa deve ser maior que zero.")
+
+    return value
+
+
+def list_active_plates() -> list[str]:
+    conn = db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT plate
+        FROM vehicles
+        WHERE active=1
+        ORDER BY plate ASC
+    """)
+    plates = [row["plate"] for row in cur.fetchall()]
+    conn.close()
+    return plates
+
+
+def plate_is_registered(vehicle_plate: str) -> bool:
+    conn = db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT 1
+        FROM vehicles
+        WHERE plate=? AND active=1
+        LIMIT 1
+    """, (vehicle_plate,))
+    row = cur.fetchone()
+    conn.close()
+    return row is not None
+
+
 def definir_caixa(plate):
-    if str(plate).startswith("AAA1A11"):
-        return 1
-    elif str(plate).startswith("BBB2B22"):
-        return 2
+    conn = db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT caixa
+        FROM vehicles
+        WHERE plate=? AND active=1
+        LIMIT 1
+    """, (plate,))
+    row = cur.fetchone()
+    conn.close()
+
+    if row and row["caixa"] is not None:
+        return int(row["caixa"])
     return None
 
 def _prune_tokens():
@@ -290,9 +466,15 @@ def init_db():
         checkout_user TEXT NOT NULL,
         checkin_user TEXT,
         checkout_answers TEXT,
-        checkin_answers TEXT
+        checkin_answers TEXT,
+        overdue_alert_sent_at TEXT
     )
     """)
+
+    cur.execute("PRAGMA table_info(assignments)")
+    assignment_columns = {row[1] for row in cur.fetchall()}
+    if "overdue_alert_sent_at" not in assignment_columns:
+        cur.execute("ALTER TABLE assignments ADD COLUMN overdue_alert_sent_at TEXT")
 
     cur.execute("""
     CREATE TABLE IF NOT EXISTS photos (
@@ -306,11 +488,40 @@ def init_db():
     )
     """)
 
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS vehicles (
+        id TEXT PRIMARY KEY,
+        plate TEXT NOT NULL UNIQUE,
+        caixa INTEGER,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL
+    )
+    """)
+
+    cur.execute("SELECT COUNT(*) AS total FROM vehicles")
+    if cur.fetchone()["total"] == 0:
+        now = datetime.now(timezone.utc).isoformat()
+        for plate, caixa in DEFAULT_VEHICLES:
+            cur.execute("""
+                INSERT INTO vehicles (id, plate, caixa, active, created_at)
+                VALUES (?, ?, ?, 1, ?)
+            """, (str(uuid.uuid4()), plate, caixa, now))
+
     conn.commit()
     conn.close()
 
 
 init_db()
+
+
+@app.on_event("startup")
+def iniciar_monitor_retiradas():
+    threading.Thread(target=loop_monitor_retiradas, daemon=True).start()
+    print(
+        "Monitor de retiradas prolongadas ativo: "
+        f"{int(RETIRADA_ALERTA_HORAS)}h, verificação a cada "
+        f"{max(RETIRADA_ALERTA_INTERVALO_SEG // 60, 1)} min."
+    )
 
 
 @app.get("/")
@@ -343,7 +554,7 @@ def get_context():
     open_by_plate = {r["vehicle_plate"]: r for r in open_rows}
 
     plates = []
-    for p in PLATES:
+    for p in list_active_plates():
         if p in open_by_plate:
             plates.append({
                 "plate": p,
@@ -359,6 +570,7 @@ def get_context():
             plates.append({"plate": p, "status": "AVAILABLE"})
 
     return {
+        "liberacaoCaixasHabilitada": LIBERACAO_CAIXAS_HABILITADA,
         "plates": plates,
         "openAssignments": [
             {
@@ -430,7 +642,7 @@ async def checkout(
     issue_farois: Optional[UploadFile] = File(None),
     issue_lataria: Optional[UploadFile] = File(None),
 ):
-    if vehicle_plate not in PLATES:
+    if not plate_is_registered(vehicle_plate):
         raise HTTPException(status_code=400, detail="Placa inválida.")
     if not user or not user.strip():
         raise HTTPException(status_code=400, detail="Informe o nome do funcionário.")
@@ -479,7 +691,7 @@ async def checkout(
         VALUES (?, ?, 'OPEN', ?, ?, ?)
     """, (assignment_id, vehicle_plate, now, user.strip(), answers_json))
 
-    if not box_released:
+    if LIBERACAO_CAIXAS_HABILITADA and not box_released:
         caixa = definir_caixa(vehicle_plate)
         if caixa:
             abrir_caixa_async(caixa)
@@ -566,9 +778,10 @@ async def checkin(
 
     vehicle_plate = row["vehicle_plate"]
 
-    caixa = definir_caixa(vehicle_plate)
-    if caixa:
-        abrir_caixa_async(caixa)
+    if LIBERACAO_CAIXAS_HABILITADA:
+        caixa = definir_caixa(vehicle_plate)
+        if caixa:
+            abrir_caixa_async(caixa)
 
     avarias_retirada = listar_avarias_checklist(checkout_answers)
     avarias_entrega = str(checkin_answers.get("obs", "")).strip()
@@ -629,6 +842,244 @@ def admin_logout(response: Response, admin_token: Optional[str] = Cookie(None)):
         ADMIN_TOKENS.pop(admin_token, None)
     response.delete_cookie("admin_token", path="/")
     return {"ok": True}
+
+
+@app.get("/api/admin/vehicles")
+def admin_list_vehicles(_=Depends(require_admin)):
+    conn = db()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT vehicle_plate
+        FROM assignments
+        WHERE status='OPEN'
+    """)
+    open_plates = {row["vehicle_plate"] for row in cur.fetchall()}
+
+    cur.execute("""
+        SELECT id, plate, caixa, active, created_at
+        FROM vehicles
+        ORDER BY plate ASC
+    """)
+    items = []
+    for row in cur.fetchall():
+        vehicle = dict(row)
+        vehicle["status"] = vehicle_usage_status(vehicle, open_plates)
+        items.append(vehicle)
+
+    conn.close()
+    return {"items": items}
+
+
+@app.post("/api/admin/vehicles")
+def admin_create_vehicle(
+    plate: str = Form(...),
+    description: str = Form(""),
+    caixa: Optional[str] = Form(None),
+    _=Depends(require_admin),
+):
+    full_plate = build_vehicle_plate(plate, description)
+    caixa_value = parse_caixa_value(caixa)
+
+    conn = db()
+    cur = conn.cursor()
+    cur.execute("SELECT id, active, created_at FROM vehicles WHERE plate=?", (full_plate,))
+    existing = cur.fetchone()
+    if existing:
+        if int(existing["active"]) == 1:
+            conn.close()
+            raise HTTPException(status_code=409, detail="Este veículo já está cadastrado.")
+
+        vehicle_id = existing["id"]
+        cur.execute("""
+            UPDATE vehicles
+            SET active=1, caixa=?
+            WHERE id=?
+        """, (caixa_value, vehicle_id))
+        conn.commit()
+        conn.close()
+
+        return {
+            "ok": True,
+            "vehicle": {
+                "id": vehicle_id,
+                "plate": full_plate,
+                "caixa": caixa_value,
+                "active": 1,
+                "created_at": existing["created_at"],
+                "status": "AVAILABLE",
+            },
+            "message": f"Veículo {full_plate} reativado com sucesso.",
+        }
+
+    now = datetime.now(timezone.utc).isoformat()
+    vehicle_id = str(uuid.uuid4())
+    cur.execute("""
+        INSERT INTO vehicles (id, plate, caixa, active, created_at)
+        VALUES (?, ?, ?, 1, ?)
+    """, (vehicle_id, full_plate, caixa_value, now))
+    conn.commit()
+    conn.close()
+
+    return {
+        "ok": True,
+        "vehicle": {
+            "id": vehicle_id,
+            "plate": full_plate,
+            "caixa": caixa_value,
+            "active": 1,
+            "created_at": now,
+            "status": "AVAILABLE",
+        },
+        "message": f"Veículo {full_plate} cadastrado com sucesso.",
+    }
+
+
+@app.put("/api/admin/vehicles/{vehicle_id}")
+def admin_update_vehicle(
+    vehicle_id: str,
+    plate: str = Form(...),
+    description: str = Form(""),
+    caixa: Optional[str] = Form(None),
+    _=Depends(require_admin),
+):
+    full_plate = build_vehicle_plate(plate, description)
+    caixa_value = parse_caixa_value(caixa)
+
+    conn = db()
+    cur = conn.cursor()
+    cur.execute("SELECT id, plate, active FROM vehicles WHERE id=?", (vehicle_id,))
+    current = cur.fetchone()
+    if not current:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Veículo não encontrado.")
+
+    if int(current["active"]) != 1:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Veículo inativo.")
+
+    old_plate = current["plate"]
+    if full_plate != old_plate:
+        cur.execute("SELECT id FROM vehicles WHERE plate=? AND id<>?", (full_plate, vehicle_id))
+        if cur.fetchone():
+            conn.close()
+            raise HTTPException(status_code=409, detail="Já existe outro veículo com esta placa.")
+
+    cur.execute("""
+        UPDATE vehicles
+        SET plate=?, caixa=?
+        WHERE id=?
+    """, (full_plate, caixa_value, vehicle_id))
+
+    if full_plate != old_plate:
+        cur.execute("""
+            UPDATE assignments
+            SET vehicle_plate=?
+            WHERE vehicle_plate=?
+        """, (full_plate, old_plate))
+
+    cur.execute("""
+        SELECT vehicle_plate
+        FROM assignments
+        WHERE status='OPEN'
+    """)
+    open_plates = {row["vehicle_plate"] for row in cur.fetchall()}
+
+    cur.execute("""
+        SELECT id, plate, caixa, active, created_at
+        FROM vehicles
+        WHERE id=?
+    """, (vehicle_id,))
+    updated = dict(cur.fetchone())
+    updated["status"] = vehicle_usage_status(updated, open_plates)
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "ok": True,
+        "vehicle": updated,
+        "message": f"Veículo atualizado para {full_plate}.",
+    }
+
+
+@app.delete("/api/admin/vehicles/{vehicle_id}")
+def admin_deactivate_vehicle(vehicle_id: str, _=Depends(require_admin)):
+    conn = db()
+    cur = conn.cursor()
+    cur.execute("SELECT id, plate, active FROM vehicles WHERE id=?", (vehicle_id,))
+    current = cur.fetchone()
+    if not current:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Veículo não encontrado.")
+
+    if int(current["active"]) != 1:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Veículo já está inativo.")
+
+    cur.execute("""
+        SELECT id
+        FROM assignments
+        WHERE status='OPEN' AND vehicle_plate=?
+        LIMIT 1
+    """, (current["plate"],))
+    if cur.fetchone():
+        conn.close()
+        raise HTTPException(
+            status_code=409,
+            detail="Não é possível desativar um veículo que está em uso no momento.",
+        )
+
+    cur.execute("UPDATE vehicles SET active=0 WHERE id=?", (vehicle_id,))
+    conn.commit()
+    conn.close()
+
+    return {
+        "ok": True,
+        "message": f"Veículo {current['plate']} desativado com sucesso.",
+    }
+
+
+@app.post("/api/admin/vehicles/{vehicle_id}/activate")
+def admin_activate_vehicle(vehicle_id: str, _=Depends(require_admin)):
+    conn = db()
+    cur = conn.cursor()
+    cur.execute("SELECT id, plate, active, caixa, created_at FROM vehicles WHERE id=?", (vehicle_id,))
+    current = cur.fetchone()
+    if not current:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Veículo não encontrado.")
+
+    if int(current["active"]) == 1:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Veículo já está ativo.")
+
+    cur.execute("""
+        SELECT id
+        FROM vehicles
+        WHERE plate=? AND active=1 AND id<>?
+        LIMIT 1
+    """, (current["plate"], vehicle_id))
+    if cur.fetchone():
+        conn.close()
+        raise HTTPException(
+            status_code=409,
+            detail="Já existe outro veículo ativo com esta placa.",
+        )
+
+    cur.execute("UPDATE vehicles SET active=1 WHERE id=?", (vehicle_id,))
+    vehicle = dict(current)
+    vehicle["active"] = 1
+    vehicle["status"] = "AVAILABLE"
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "ok": True,
+        "vehicle": vehicle,
+        "message": f"Veículo {current['plate']} reativado com sucesso.",
+    }
 
 
 @app.get("/api/admin/assignments")
