@@ -524,6 +524,11 @@ def iniciar_monitor_retiradas():
     )
 
 
+@app.get("/health")
+def health():
+    return {"ok": True}
+
+
 @app.get("/")
 def root():
     return FileResponse("static/index.html")

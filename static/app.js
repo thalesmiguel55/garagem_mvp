@@ -53,12 +53,28 @@ async function parseApiResponse(res) {
 
 async function loadContext() {
   showMessage("");
-  card.innerHTML = "Carregando...";
+  card.innerHTML = "Carregando veículos...";
 
-  const r = await fetch("/api/context");
-  const ctx = await r.json();
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 90000);
 
-  renderHome(ctx);
+  try {
+    const r = await fetch("/api/context", { signal: controller.signal });
+    const ctx = await r.json();
+    if (!r.ok) throw new Error(formatApiError(ctx, "Não foi possível carregar o sistema."));
+    renderHome(ctx);
+  } catch (error) {
+    card.innerHTML = "";
+    const isTimeout = error?.name === "AbortError";
+    showMessage(
+      isTimeout
+        ? "O servidor está iniciando. No Render free isso pode levar até 1 minuto. Aguarde e recarregue a página."
+        : (error.message || "Falha ao carregar o sistema."),
+      "err"
+    );
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 }
 
 function renderHome(ctx) {
