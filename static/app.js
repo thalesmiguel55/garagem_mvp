@@ -68,7 +68,7 @@ async function loadContext() {
     const isTimeout = error?.name === "AbortError";
     showMessage(
       isTimeout
-        ? "O servidor está iniciando. No Render free isso pode levar até 1 minuto. Aguarde e recarregue a página."
+        ? "O servidor demorou para responder. Aguarde alguns segundos e recarregue a página."
         : (error.message || "Falha ao carregar o sistema."),
       "err"
     );

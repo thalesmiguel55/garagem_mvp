@@ -1,13 +1,13 @@
 param(
-    [string]$ServerIp = "192.168.88.249",
-    [int[]]$Ports = @(8000, 80, 8080)
+    [string]$ServerIp = "192.168.188.36",
+    [int[]]$Ports = @(7070)
 )
 
 $ErrorActionPreference = "Continue"
 
 Write-Host ""
 Write-Host "Diagnostico de acesso ao Garagem MVP"
-Write-Host "Executar este script em um PC/celular na rede 192.168.88.x"
+Write-Host "Servidor alvo: $ServerIp"
 Write-Host ""
 
 $ip = Get-NetIPAddress -AddressFamily IPv4 |
@@ -20,16 +20,13 @@ if ($ip) {
     Write-Host "IP local detectado: (nao encontrado)"
 }
 
-Write-Host "Servidor alvo: $ServerIp"
 Write-Host ""
-
 Write-Host "1) Teste de ping"
 $ping = Test-Connection -ComputerName $ServerIp -Count 2 -Quiet
 if ($ping) {
     Write-Host "   OK - ping respondeu" -ForegroundColor Green
 } else {
     Write-Host "   FALHA - sem rota ate o servidor" -ForegroundColor Red
-    Write-Host "   Verifique se o servidor esta ativo em 192.168.88.249 e se a rede local tem rota ate ele"
 }
 
 Write-Host ""
@@ -55,7 +52,4 @@ foreach ($port in $Ports) {
     }
 }
 
-Write-Host ""
-Write-Host "Se ping OK e portas falharem, o firewall/roteador esta bloqueando as portas entre VLANs."
-Write-Host "Se tudo falhar, nao existe rota da rede 88 para a rede 90."
 Write-Host ""

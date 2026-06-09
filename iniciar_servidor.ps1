@@ -1,5 +1,5 @@
 param(
-    [int]$Port = 8000,
+    [int]$Port = 7070,
     [string]$HostAddress = "0.0.0.0",
     [string]$PublicUrl = ""
 )
@@ -7,7 +7,7 @@ param(
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
-$DefaultServerIp = "192.168.88.249"
+$DefaultServerIp = "192.168.188.36"
 $Python = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
 if (-not (Test-Path $Python)) {
     throw "Ambiente virtual nao encontrado em .venv\Scripts\python.exe"
@@ -23,7 +23,7 @@ function Get-LocalIPv4 {
         }
     }
 
-    $preferred = $ips | Where-Object { $_ -like "192.168.88.*" } | Select-Object -First 1
+    $preferred = $ips | Where-Object { $_ -like "192.168.188.*" } | Select-Object -First 1
     if ($preferred) { return $preferred }
 
     if ($ips.Count -gt 0) { return $ips[0] }
@@ -38,9 +38,10 @@ if ([string]::IsNullOrWhiteSpace($PublicUrl)) {
 Write-Host ""
 Write-Host "Sistema Garagem"
 Write-Host "URL para funcionarios: $PublicUrl"
+Write-Host "Admin: http://$($Ip):$Port/admin"
 Write-Host "QR Code: static\qrcode-garagem.png"
 Write-Host ""
-Write-Host "Servidor configurado para a rede 192.168.88.x"
+Write-Host "Servidor configurado para 192.168.188.36 na porta $Port"
 Write-Host ""
 
 & $Python gerar_qrcode.py --url $PublicUrl --output "static\qrcode-garagem.png" --html "static\qrcode.html"

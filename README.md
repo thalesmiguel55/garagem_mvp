@@ -2,6 +2,15 @@
 
 Aplicacao FastAPI para controle de entrada e saida de veiculos com interface web, upload de fotos e notificacoes via Telegram.
 
+## Servidor local
+
+| Item | Valor |
+|------|-------|
+| IP | `192.168.188.36` |
+| Porta | `7070` |
+| URL | `http://192.168.188.36:7070/` |
+| Admin | `http://192.168.188.36:7070/admin` |
+
 ## Requisitos
 
 - Python 3.11+
@@ -21,7 +30,15 @@ pip install -r requirements.txt
 ## Execucao
 
 ```powershell
-uvicorn app:app --host 0.0.0.0 --port 8000
+.\iniciar_servidor.ps1
 ```
 
-Acesse `http://localhost:8000`.
+Ou manualmente:
+
+```powershell
+uvicorn app:app --host 0.0.0.0 --port 7070
+```
+
+Acesse `http://192.168.188.36:7070/`.
+
+Mais detalhes de rede em `ACESSO_REDE.md`.
